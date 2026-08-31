@@ -16,8 +16,8 @@ Route::get('/', function () {
     return view('welcome');
 });
 
-// Finance — requires auth (PRD §4 Owner/Admin)
-Route::middleware(['auth', 'verified'])->group(function () {
+// Finance — requires auth (PRD §4 Owner/Admin) — verified optional for demo
+Route::middleware(['auth'])->group(function () {
     // Dashboard SPA — §11-42
     Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
 

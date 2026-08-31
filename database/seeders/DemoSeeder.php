@@ -13,8 +13,12 @@ class DemoSeeder extends Seeder
     {
         $user = User::firstOrCreate(
             ['email' => 'owner@keukita.id'],
-            ['name' => 'Owner', 'password' => bcrypt('password')]
+            ['name' => 'Owner', 'password' => bcrypt('password'), 'email_verified_at' => now()]
         );
+        // ensure verified
+        if (!$user->email_verified_at) {
+            $user->update(['email_verified_at' => now()]);
+        }
 
         // Create business via template (Coffee Shop)
         $business = BusinessService::createWithTemplate([
