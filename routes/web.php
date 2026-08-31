@@ -27,11 +27,6 @@ Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard
 Route::get('/income', fn() => redirect()->route('dashboard'))->name('income');
 Route::get('/expense', fn() => redirect()->route('dashboard'))->name('expense');
 Route::get('/transfer', fn() => redirect()->route('dashboard'))->name('transfer');
-Route::get('/accounts', fn() => redirect()->route('dashboard'))->name('accounts');
-Route::get('/assets', fn() => redirect()->route('dashboard'))->name('assets');
+Route::get('/finance/accounts', fn() => redirect()->route('dashboard'))->name('accounts');
+Route::get('/finance/assets', fn() => redirect()->route('dashboard'))->name('assets');
 Route::get('/reports', fn() => redirect()->route('dashboard'))->name('reports');
-
-// API placeholder for future Livewire / SPA sync (business_id isolation)
-Route::prefix('api')->group(function () {
-    Route::get('/health', fn() => response()->json(['status' => 'ok', 'app' => 'KeuKita', 'version' => '1.0-mvp']));
-});

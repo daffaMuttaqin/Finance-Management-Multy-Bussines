@@ -650,8 +650,16 @@
 <script>lucide.createIcons();</script>
 @if(isset($business))
 <script>
-  window._serverBusiness = @json($business);
-  window._serverAccounts = @json($accounts ?? []);
+  window._serverData = {
+    business: @json($business),
+    accounts: @json($accounts ?? []),
+    categories: @json($categories ?? []),
+    transactions: @json($transactions ?? []),
+    assets: @json($assets ?? []),
+    metrics: @json($metrics ?? null),
+    available: @json($available ?? 0)
+  };
+  console.log('[KeuKita] Hydrated from DB:', window._serverData);
 </script>
 @endif
 @endpush

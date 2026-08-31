@@ -96,8 +96,126 @@ function loadState(){
 }
 function saveState(s){ localStorage.setItem(KEY, JSON.stringify(s)); }
 
-let state = loadState() || defaultState();
-if(!loadState()) saveState(state);
+// Hydrate from Laravel Blade server data if available (backend mode)
+function hydrateFromServer(srv){
+  try{
+    const b = srv.business;
+    const business = {
+      id: 'biz_'+b.id,
+      _dbId: b.id,
+      name: b.name,
+      type: b.type,
+      logo: b.logo || 'https://api.dicebear.com/7.x/shapes/svg?seed=kopi',
+      currency: b.currency || 'IDR',
+      timezone: b.timezone || 'Asia/Jakarta'
+    };
+    const accounts = (srv.accounts||[]).map(a=> ({
+      id: 'acc_'+a.id,
+      _dbId: a.id,
+      name: a.name,
+      type: a.type,
+      opening: a.opening_balance ?? a.opening ?? 0,
+      archived: !!a.is_archived,
+      _current_balance: a.current_balance
+    }));
+    const categories = (srv.categories||[]).map(c=> ({
+      id: 'cat_'+c.id,
+      _dbId: c.id,
+      name: c.name,
+      type: c.type,
+      classification: c.classification,
+      affects_profit: !!c.affects_profit,
+      archived: !!c.is_archived
+    }));
+    const transactions = (srv.transactions||[]).map(t=> ({
+      id: 'tx_'+t.id,
+      _dbId: t.id,
+      business_id: business.id,
+      _businessDbId: t.business_id,
+      type: t.type,
+      status: t.status,
+      category_id: t.category_id ? 'cat_'+t.category_id : null,
+      _categoryDbId: t.category_id,
+      account_id: t.account_id ? 'acc_'+t.account_id : null,
+      _accountDbId: t.account_id,
+      from_account_id: t.from_account_id ? 'acc_'+t.from_account_id : null,
+      _fromDbId: t.from_account_id,
+      to_account_id: t.to_account_id ? 'acc_'+t.to_account_id : null,
+      _toDbId: t.to_account_id,
+      amount: t.amount,
+      transaction_date: (t.transaction_date||'').slice(0,10),
+      description: t.description || '',
+      reference: t.reference_number || '',
+      party: t.party || '',
+      created_at: t.created_at
+    }));
+    const assets = (srv.assets||[]).map(a=> ({
+      id: 'as_'+a.id,
+      _dbId: a.id,
+      name: a.name,
+      category: a.category,
+      purchase_date: (a.purchase_date||'').slice(0,10),
+      purchase_price: a.purchase_price,
+      account_id: a.account_id ? 'acc_'+a.account_id : null,
+      _accountDbId: a.account_id,
+      description: a.description || '',
+      status: a.status
+    }));
+    // Try to keep local audit if server not providing, else empty
+    const audit = (srv.audit || [{id:'au_'+uid(), business_id: business.id, user:'System', action:'HYDRATED_FROM_DB', entity:'business', entity_id: business.id, detail:'Hydrated from Laravel DB via Blade', created_at: nowISO()}]);
+    const settings = b.settings || {cogs:true, assets:true, tax:false, receivable:false, payable:false};
+    return { business, accounts, categories, transactions, assets, audit, settings };
+  }catch(e){
+    console.error('hydrate failed', e);
+    return null;
+  }
+}
+
+let state;
+if (window._serverData && window._serverData.business) {
+  const hydrated = hydrateFromServer(window._serverData);
+  if (hydrated) {
+    state = hydrated;
+    saveState(state);
+    console.log('[KeuKita] Hydrated from server DB');
+  } else {
+    state = loadState() || defaultState();
+    if(!loadState()) saveState(state);
+  }
+} else {
+  state = loadState() || defaultState();
+  if(!loadState()) saveState(state);
+}
+
+// Server mode detection & API helpers
+const isServerMode = !!(window._serverData && window._serverData.business);
+const BUSINESS_DB_ID = window._serverData?.business?.id || null;
+const API_BASE = '/api';
+async function apiCall(path, opts={}){
+  const headers = {'Content-Type':'application/json','Accept':'application/json', ...(opts.headers||{})};
+  // CSRF for web fallback (if using web routes)
+  const csrf = document.querySelector('meta[name="csrf-token"]')?.content;
+  if(csrf) headers['X-CSRF-TOKEN'] = csrf;
+  const res = await fetch(API_BASE + path, {headers, ...opts});
+  const data = await res.json().catch(()=> ({}));
+  if(!res.ok) throw new Error(data.message || 'API error '+res.status);
+  return data;
+}
+function toDbId(frontendId){
+  if(!frontendId) return null;
+  // frontendId like 'cat_1' or 'acc_1' — find in state
+  const cat = state.categories.find(c=>c.id===frontendId);
+  if(cat && cat._dbId) return cat._dbId;
+  const acc = state.accounts.find(a=>a.id===frontendId);
+  if(acc && acc._dbId) return acc._dbId;
+  // if already numeric
+  const num = parseInt(String(frontendId).replace(/\D/g,''),10);
+  return isNaN(num)? frontendId : num;
+}
+function dbIdToFrontend(dbId, prefix){
+  // not needed for now
+  return prefix + '_' + dbId;
+}
 
 // ensure business_id on all
 function ensureBusinessId(){ state.transactions.forEach(t=>{ if(!t.business_id) t.business_id = state.business.id; }); saveState(state); }
@@ -796,11 +914,16 @@ function closeConfirm(){ document.getElementById('modalConfirm').classList.add('
 function confirmVoid(id){
   const t = state.transactions.find(x=>x.id===id);
   if(!t || t.status==='VOIDED') return;
-  showConfirm('Void transaksi?', `Transaksi ${t.type} ${fmtIDR(t.amount)} akan di-VOID. Dampak saldo & laporan akan di-reverse. Audit trail tercatat.`, 'Ya, Void', ()=>{
+  showConfirm('Void transaksi?', `Transaksi ${t.type} ${fmtIDR(t.amount)} akan di-VOID. Dampak saldo & laporan akan di-reverse. Audit trail tercatat.`, 'Ya, Void', async ()=>{
     const old = {...t};
     t.status='VOIDED';
     saveState(state);
     addAudit('VOID_TRANSACTION','transaction',t.id, `${t.type} ${fmtIDR(t.amount)} • ${t.description||''}`, old, {...t});
+    if(isServerMode && t._dbId){
+      try{
+        await apiCall(`/transactions/${t._dbId}/void`, {method:'POST', body: JSON.stringify({business_id: BUSINESS_DB_ID})});
+      }catch(e){ toast(e.message,'error'); }
+    }
     refreshChrome(); renderDashboard(); renderIncome(); renderExpense(); renderTransfer(); renderReports(); toast('Transaksi di-void • saldo & laporan ter-reverse');
   });
 }
@@ -908,8 +1031,8 @@ document.addEventListener('DOMContentLoaded', ()=>{
   document.getElementById('accOpening').addEventListener('input', (e)=> formatInputAmount(e.target));
   document.getElementById('assetPrice').addEventListener('input', (e)=> formatInputAmount(e.target));
 
-  // form tx submit
-  document.getElementById('formTx').addEventListener('submit', (e)=>{
+  // form tx submit — hybrid localStorage + API (server mode)
+  document.getElementById('formTx').addEventListener('submit', async (e)=>{
     e.preventDefault();
     const type = document.querySelector('.tx-type-btn.border-emerald-500')?.dataset.txType || 'INCOME';
     const amount = parseAmount(document.getElementById('txAmount').value);
@@ -919,6 +1042,19 @@ document.addEventListener('DOMContentLoaded', ()=>{
     const desc = document.getElementById('txDesc').value.trim();
     const party = document.getElementById('txParty').value.trim();
     const ref = document.getElementById('txRef').value.trim();
+
+    // helper to sync to API when server mode
+    const syncToApi = async (payload, method, url)=>{
+      if(!isServerMode || !BUSINESS_DB_ID) return null;
+      try{
+        return await apiCall(url, {method, body: JSON.stringify(payload)});
+      }catch(err){
+        toast(err.message || 'Gagal sinkron ke server','error');
+        console.error('API sync failed', err);
+        return null;
+      }
+    };
+
     if(type==='TRANSFER'){
       const from = document.getElementById('txFrom').value;
       const to = document.getElementById('txTo').value;
@@ -929,11 +1065,20 @@ document.addEventListener('DOMContentLoaded', ()=>{
         const old={...t};
         Object.assign(t, {from_account_id:from, to_account_id:to, amount, transaction_date:date, description:desc, reference:ref, party});
         addAudit('UPDATE_TRANSACTION','transaction',t.id, `Transfer ${fmtIDR(amount)}`, old, {...t});
-        saveState(state); closeTxModal(); refreshChrome(); renderDashboard(); renderTransfer(); renderReports(); toast('Transfer diperbarui');
+        saveState(state);
+        if(isServerMode && t._dbId){
+          await syncToApi({business_id: BUSINESS_DB_ID, type:'TRANSFER', from_account_id: toDbId(from), to_account_id: toDbId(to), amount, transaction_date: date, description: desc, reference_number: ref, party}, 'PUT', `/transactions/${t._dbId}`);
+        }
+        closeTxModal(); refreshChrome(); renderDashboard(); renderTransfer(); renderReports(); toast('Transfer diperbarui');
       } else {
         const nt = {id:'tx_'+uid(), business_id: state.business.id, type:'TRANSFER', status:'POSTED', from_account_id:from, to_account_id:to, amount, transaction_date:date, description:desc, reference:ref, party, created_at: nowISO()};
         state.transactions.unshift(nt);
-        saveState(state); addAudit('CREATE_TRANSACTION','transaction',nt.id, `Transfer ${fmtIDR(amount)}`); closeTxModal(); refreshChrome(); renderDashboard(); renderTransfer(); renderReports(); toast('Transfer disimpan • profit tidak berubah');
+        saveState(state); addAudit('CREATE_TRANSACTION','transaction',nt.id, `Transfer ${fmtIDR(amount)}`);
+        if(isServerMode){
+          const res = await syncToApi({business_id: BUSINESS_DB_ID, type:'TRANSFER', from_account_id: toDbId(from), to_account_id: toDbId(to), amount, transaction_date: date, description: desc, reference_number: ref, party}, 'POST', '/transactions');
+          if(res && res.id) { nt._dbId = res.id; nt._fromDbId = res.from_account_id; nt._toDbId = res.to_account_id; saveState(state); }
+        }
+        closeTxModal(); refreshChrome(); renderDashboard(); renderTransfer(); renderReports(); toast('Transfer disimpan • profit tidak berubah');
       }
     } else {
       const cat = document.getElementById('txCategory').value;
@@ -944,12 +1089,21 @@ document.addEventListener('DOMContentLoaded', ()=>{
         const old={...t};
         Object.assign(t, {category_id:cat, account_id:acc, amount, transaction_date:date, description:desc, reference:ref, party});
         addAudit('UPDATE_TRANSACTION','transaction',t.id, `${t.type} ${fmtIDR(amount)}`, old, {...t});
-        saveState(state); closeTxModal(); refreshChrome(); renderDashboard(); renderIncome(); renderExpense(); renderReports(); toast('Transaksi diperbarui');
+        saveState(state);
+        if(isServerMode && t._dbId){
+          await syncToApi({business_id: BUSINESS_DB_ID, type, category_id: toDbId(cat), account_id: toDbId(acc), amount, transaction_date: date, description: desc, reference_number: ref, party}, 'PUT', `/transactions/${t._dbId}`);
+        }
+        closeTxModal(); refreshChrome(); renderDashboard(); renderIncome(); renderExpense(); renderReports(); toast('Transaksi diperbarui');
       } else {
         const nt = {id:'tx_'+uid(), business_id: state.business.id, type, status:'POSTED', category_id:cat, account_id:acc, amount, transaction_date:date, description:desc, reference:ref, party, created_at: nowISO()};
         state.transactions.unshift(nt);
         const catName = getCategory(cat)?.name||'';
-        saveState(state); addAudit('CREATE_TRANSACTION','transaction',nt.id, `${type} ${fmtIDR(amount)} • ${catName}`); closeTxModal(); refreshChrome(); renderDashboard(); if(type==='INCOME') renderIncome(); else renderExpense(); renderReports(); toast(type==='INCOME' ? 'Uang masuk disimpan • saldo & revenue +'+fmtIDR(amount) : 'Uang keluar disimpan • saldo -'+fmtIDR(amount));
+        saveState(state); addAudit('CREATE_TRANSACTION','transaction',nt.id, `${type} ${fmtIDR(amount)} • ${catName}`);
+        if(isServerMode){
+          const res = await syncToApi({business_id: BUSINESS_DB_ID, type, category_id: toDbId(cat), account_id: toDbId(acc), amount, transaction_date: date, description: desc, reference_number: ref, party}, 'POST', '/transactions');
+          if(res && res.id) { nt._dbId = res.id; nt._categoryDbId = res.category_id; nt._accountDbId = res.account_id; saveState(state); }
+        }
+        closeTxModal(); refreshChrome(); renderDashboard(); if(type==='INCOME') renderIncome(); else renderExpense(); renderReports(); toast(type==='INCOME' ? 'Uang masuk disimpan • saldo & revenue +'+fmtIDR(amount) : 'Uang keluar disimpan • saldo -'+fmtIDR(amount));
       }
     }
   });
