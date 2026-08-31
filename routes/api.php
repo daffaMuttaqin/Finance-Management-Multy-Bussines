@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\TransactionController;
 use App\Http\Controllers\Api\AssetController;
 use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\AuditController;
+use App\Http\Controllers\Api\ExportController;
 
 /*
 |--------------------------------------------------------------------------
@@ -52,6 +53,10 @@ Route::post('/assets', [AssetController::class,'store']);
 Route::get('/reports/summary', [ReportController::class,'summary']);
 Route::get('/reports/dashboard', [ReportController::class,'dashboard']);
 Route::get('/reports/export', [ReportController::class,'export']);
+
+// Export §34 — Excel (CSV) & PDF (HTML printable, dompdf jika ada)
+Route::get('/export/excel', [ExportController::class,'excel']);
+Route::get('/export/pdf', [ExportController::class,'pdf']);
 
 // Audit §39
 Route::get('/audit', [AuditController::class,'index']);

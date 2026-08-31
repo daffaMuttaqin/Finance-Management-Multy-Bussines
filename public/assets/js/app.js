@@ -1206,9 +1206,53 @@ document.addEventListener('DOMContentLoaded', ()=>{
   document.getElementById('reportType').addEventListener('change', renderReports);
   document.getElementById('reportCategory').addEventListener('change', renderReports);
   document.getElementById('reportAccount').addEventListener('change', renderReports);
-  document.getElementById('btnExportExcel').addEventListener('click', ()=> toast('Export Excel (mock) — mengikuti filter aktif ✓'));
-  document.getElementById('btnExportPdf').addEventListener('click', ()=> toast('Export PDF (mock) — mengikuti filter aktif ✓'));
-  document.getElementById('btnExportDash').addEventListener('click', ()=> toast('Export Dashboard (mock) ✓'));
+  // Export §34 — mengikuti filter aktif, via backend (CSV/PDF)
+  function buildExportQuery(){
+    const preset = document.getElementById('reportPreset')?.value || 'all';
+    let from=null,to=null;
+    const now=new Date();
+    if(preset==='today') from=to=todayISO();
+    else if(preset==='week'){ const d=new Date(); d.setDate(now.getDate()-7); from=d.toISOString().slice(0,10); to=todayISO(); }
+    else if(preset==='month'){ from=now.toISOString().slice(0,7)+'-01'; to=todayISO(); }
+    else if(preset==='lastMonth'){ const d=new Date(now.getFullYear(), now.getMonth()-1,1); const e=new Date(now.getFullYear(), now.getMonth(),0); from=d.toISOString().slice(0,10); to=e.toISOString().slice(0,10); }
+    else if(preset==='year'){ from=now.getFullYear()+'-01-01'; to=todayISO(); }
+    else if(preset==='custom'){ from=document.getElementById('reportFrom')?.value||null; to=document.getElementById('reportTo')?.value||null; }
+    const p=new URLSearchParams();
+    if(BUSINESS_DB_ID) p.set('business_id', BUSINESS_DB_ID); else if(state.business?._dbId) p.set('business_id', state.business._dbId); else p.set('business_id','1');
+    if(from) p.set('from', from);
+    if(to) p.set('to', to);
+    const type=document.getElementById('reportType')?.value; if(type && type!=='all') p.set('type', type);
+    const cat=document.getElementById('reportCategory')?.value; if(cat) p.set('category_id', toDbId(cat));
+    const acc=document.getElementById('reportAccount')?.value; if(acc) p.set('account_id', toDbId(acc));
+    return p.toString();
+  }
+  document.getElementById('btnExportExcel').addEventListener('click', ()=>{
+    const q=buildExportQuery();
+    if(isServerMode){
+      window.location.href = '/api/export/excel?'+q;
+      toast('Download Excel (CSV) — filter aktif ✓');
+    } else {
+      toast('Export Excel (mock) — login dulu untuk download real ✓');
+      // fallback: trigger local CSV via frontend
+      const blob=new Blob([['Tanggal,Tipe,Kategori,Akun,Jumlah'].join('\n')],{type:'text/csv'});
+      const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='keukita-mock.csv'; a.click(); URL.revokeObjectURL(url);
+    }
+  });
+  document.getElementById('btnExportPdf').addEventListener('click', ()=>{
+    const q=buildExportQuery();
+    if(isServerMode){
+      window.open('/api/export/pdf?'+q, '_blank');
+      toast('Buka PDF — filter aktif ✓');
+    } else {
+      toast('Export PDF (mock) — login dulu ✓');
+      window.print();
+    }
+  });
+  document.getElementById('btnExportDash').addEventListener('click', ()=>{
+    const q=buildExportQuery();
+    if(isServerMode) window.location.href='/api/export/excel?'+q;
+    else toast('Export Dashboard (mock) ✓');
+  });
 
   // filters
   document.getElementById('searchIncome').addEventListener('input', renderIncome);
