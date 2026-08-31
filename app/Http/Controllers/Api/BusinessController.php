@@ -11,8 +11,8 @@ class BusinessController extends Controller
 {
     public function index(Request $request)
     {
-        // untuk V1 single business per user, return first
-        $business = Business::with(['accounts','categories'])->first();
+        // V1: single business, ambil terbaru (wizard bisa buat baru)
+        $business = Business::with(['accounts','categories'])->latest('id')->first();
         if (!$business) return response()->json(['message' => 'Belum ada business — jalankan wizard.'], 404);
         return response()->json($business);
     }
@@ -25,6 +25,7 @@ class BusinessController extends Controller
             'logo' => 'nullable|string',
             'currency' => 'required|string',
             'timezone' => 'required|string',
+            'settings' => 'nullable|array',
             'accounts' => 'nullable|array',
             'income_categories' => 'nullable|array',
             'expense_categories' => 'nullable|array',

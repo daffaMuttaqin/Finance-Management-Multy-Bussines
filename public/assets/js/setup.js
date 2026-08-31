@@ -186,12 +186,10 @@ document.addEventListener('DOMContentLoaded', ()=>{
   });
   document.getElementById('btnPrev').addEventListener('click', ()=>{ if(step>1){ step--; renderStep(); }});
   document.getElementById('btnBackTo4').addEventListener('click', ()=>{ step=4; renderStep(); });
-  document.getElementById('btnFinish').addEventListener('click', ()=>{
-    // Build state to persist
+  document.getElementById('btnFinish').addEventListener('click', async ()=>{
     const business={id:'biz_'+uid(), name: document.getElementById('wName').value.trim(), type: document.getElementById('wType').value, logo: document.getElementById('wLogo').value, currency: document.getElementById('wCurrency').value, timezone: document.getElementById('wTz').value };
     const accounts=wAccounts.map(a=> ({id:a.id, name:a.name, type:a.type, opening:a.opening, archived:false}));
     const categories=wCategories.map(c=> ({id:c.id, name:c.name, type:c.type, classification:c.classification, affects_profit: c.type==='INCOME'? true : !!c.affects, archived:false}));
-    // ensure non-profit defaults
     if(!categories.some(c=> c.name==='Asset Purchase')) categories.push({id:'cat_'+uid(), name:'Asset Purchase', type:'EXPENSE', classification:'Asset', affects_profit:false, archived:false});
     if(!categories.some(c=> c.name==='Owner Withdrawal')) categories.push({id:'cat_'+uid(), name:'Owner Withdrawal', type:'EXPENSE', classification:'Other', affects_profit:false, archived:false});
     const settings={cogs: document.getElementById('wCOGS').checked, assets: document.getElementById('wAssets').checked, tax: document.getElementById('wTax').checked, receivable: document.getElementById('wReceivable').checked, payable: document.getElementById('wPayable').checked};
@@ -201,14 +199,59 @@ document.addEventListener('DOMContentLoaded', ()=>{
       audit:[{id:'au_'+uid(), business_id: business.id, user:'Owner', action:'BUSINESS_CREATED', entity:'business', entity_id: business.id, detail:`Business ${business.name} (${business.type}) dibuat via wizard`, created_at: new Date().toISOString()}],
       settings
     };
-    // Seed demo transactions if coffee shop? keep empty to show empty states? But PRD wants quick start, so seed one income
-    // Do not seed to showcase empty states? We'll seed minimal
     if(accounts.length){
-      // add opening balances as not transactions - handled via accountBalance
+      // opening balances handled via accountBalance
     }
-    localStorage.setItem(KEY, JSON.stringify(state));
-    // Laravel Blade provides dashboardUrl, fallback to index.html for static
-    location.href = window.dashboardUrl || 'index.html';
+    // Try backend API first (MySQL), fallback to localStorage
+    const payload = {
+      business_name: business.name,
+      business_type: business.type,
+      logo: business.logo,
+      currency: business.currency,
+      timezone: business.timezone,
+      settings,
+      accounts: wAccounts.map(a=> ({name:a.name, type:a.type, opening_balance:a.opening})),
+      income_categories: wCategories.filter(c=>c.type==='INCOME').map(c=>c.name),
+      expense_categories: wCategories.filter(c=>c.type==='EXPENSE').map(c=> ({name:c.name, classification:c.classification, affects_profit: !!c.affects})),
+    };
+    const btn = document.getElementById('btnFinish');
+    const origText = btn.textContent;
+    btn.textContent = 'Menyimpan...';
+    btn.disabled = true;
+    try{
+      const csrf = document.querySelector('meta[name="csrf-token"]')?.content;
+      const res = await fetch('/api/business', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json','Accept':'application/json', ...(csrf?{'X-CSRF-TOKEN':csrf}:{})},
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json().catch(()=> ({}));
+      if(!res.ok) throw new Error(data.message || 'Gagal simpan ke server');
+      console.log('[KeuKita] Business created via API', data);
+      // also sync to localStorage for offline fallback (with DB id)
+      business._dbId = data.id;
+      state.business._dbId = data.id;
+      localStorage.setItem(KEY, JSON.stringify(state));
+      // also store business_id for API hybrid mode
+      try{ localStorage.setItem('keukita_business_db_id', String(data.id)); }catch(e){}
+    }catch(e){
+      console.warn('[KeuKita] API business failed, fallback localStorage', e);
+      // keep localStorage as before, show toast but still redirect
+      try{
+        const msg = e.message || 'Gagal konek ke server, pakai localStorage';
+        // create toast element if exists
+        const t = document.createElement('div');
+        t.textContent = msg;
+        t.className = 'fixed bottom-4 left-1/2 -translate-x-1/2 bg-amber-600 text-white text-xs px-3 py-2 rounded-xl';
+        document.body.appendChild(t);
+        setTimeout(()=> t.remove(), 2500);
+      }catch(_){}
+      localStorage.setItem(KEY, JSON.stringify(state));
+    }finally{
+      btn.textContent = origText;
+      btn.disabled = false;
+      location.href = window.dashboardUrl || '/dashboard';
+    }
   });
   if(window.lucide) lucide.createIcons();
 });

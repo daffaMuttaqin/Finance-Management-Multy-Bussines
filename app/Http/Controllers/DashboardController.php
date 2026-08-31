@@ -16,7 +16,7 @@ class DashboardController extends Controller
      */
     public function index(Request $request)
     {
-        $business = Business::with(['accounts','categories','transactions.category','transactions.account','assets'])->first();
+        $business = Business::with(['accounts','categories','transactions.category','transactions.account','assets'])->latest('id')->first();
         $accounts = [];
         $categories = [];
         $transactions = [];
